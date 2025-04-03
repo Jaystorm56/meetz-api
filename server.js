@@ -65,14 +65,19 @@ app.post('/signup', async (req, res) => {
   }
   try {
     const existingUser = await User.findOne({ username });
-    if (existingUser) return res.status(400).json({ error: 'Username already exists' });
+    if (existingUser) {
+      console.log(`Signup failed: Username ${username} already exists`);
+      return res.status(400).json({ error: 'Username already exists' });
+    }
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ username, password: hashedPassword, name, age, bio });
+    const user = new User({ username, password: hashedPassword, name, age: age || 0, bio: bio || '' });
     await user.save();
     const token = jwt.sign({ id: user._id, username: user.username }, SECRET_KEY, { expiresIn: '1h' });
+    console.log(`User ${username} signed up successfully`);
     res.status(201).json({ token, user: { id: user._id, username, name } });
   } catch (err) {
-    res.status(500).json({ error: 'Signup failed' });
+    console.error('Signup error:', err); // Log the full error
+    res.status(500).json({ error: 'Signup failed', details: err.message });
   }
 });
 
