@@ -23,12 +23,16 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true }, // Email for login
   password: { type: String, required: true },
-  name: { type: String, required: true },
+  firstName: { type: String, required: true },
+  lastName: { type: String, required: true },
   age: { type: Number, default: 0 },
   bio: { type: String, default: '' },
-  photo: { type: String, default: '' },
+  gender: { type: String, default: '' },
+  interests: { type: [String], default: [] },
+  photos: { type: [String], default: [] },
   resetToken: String,
   resetTokenExpiry: Date,
+  likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 });
 const User = mongoose.model('User', userSchema);
 
@@ -59,9 +63,10 @@ const authenticateToken = (req, res, next) => {
 
 // Signup
 app.post('/signup', async (req, res) => {
-  const { username, password, name, age, bio } = req.body;
-  if (!username || !password || !name) {
-    return res.status(400).json({ error: 'Username, password, and name are required' });
+  const { username, password, firstName, lastName, termsAgreed } = req.body;
+  if (!username || !password || !firstName || !lastName || !termsAgreed) {
+    console.log('Signup failed: Missing required fields', { username, firstName, lastName, termsAgreed });
+    return res.status(400).json({ error: 'All fields and terms agreement are required' });
   }
   try {
     const existingUser = await User.findOne({ username });
@@ -70,13 +75,13 @@ app.post('/signup', async (req, res) => {
       return res.status(400).json({ error: 'Username already exists' });
     }
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ username, password: hashedPassword, name, age: age || 0, bio: bio || '' });
+    const user = new User({ username, password: hashedPassword, firstName, lastName });
     await user.save();
     const token = jwt.sign({ id: user._id, username: user.username }, SECRET_KEY, { expiresIn: '1h' });
     console.log(`User ${username} signed up successfully`);
-    res.status(201).json({ token, user: { id: user._id, username, name } });
+    res.status(201).json({ token, user: { id: user._id, username, firstName, lastName } });
   } catch (err) {
-    console.error('Signup error:', err); // Log the full error
+    console.error('Signup error:', err.message, err.stack);
     res.status(500).json({ error: 'Signup failed', details: err.message });
   }
 });
@@ -90,7 +95,7 @@ app.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const token = jwt.sign({ id: user._id, username: user.username }, SECRET_KEY, { expiresIn: '1h' });
-    res.json({ token, user: { id: user._id, username, name: user.name } });
+    res.json({ token, user: { id: user._id, username, firstName: user.firstName, lastName: user.lastName } });
   } catch (err) {
     res.status(500).json({ error: 'Login failed' });
   }
@@ -141,32 +146,49 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Get Users (for swiping)
+// Get Users (for swiping) with Match Percentage
 app.get('/users', authenticateToken, async (req, res) => {
   try {
-    const users = await User.find({ _id: { $ne: req.user.id } }, 'name age bio photo'); // Exclude current user
-    res.json(users);
+    const currentUser = await User.findById(req.user.id);
+    const users = await User.find({ _id: { $ne: req.user.id } }, 'firstName lastName age bio gender interests photos');
+    const usersWithMatch = users.map(user => {
+      const commonInterests = user.interests.filter(i => currentUser.interests.includes(i));
+      const matchPercentage = Math.round((commonInterests.length / 5) * 100); // Max 5 interests
+      return { ...user._doc, matchPercentage };
+    });
+    res.json(usersWithMatch);
   } catch (err) {
+    console.error('Error fetching users:', err);
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
 
 // Post Likes
-app.post('/likes', authenticateToken, (req, res) => {
+app.post('/likes', authenticateToken, async (req, res) => {
   const { user } = req.body; // user is the liked user's object
-  likes.push({ liker: req.user.id, liked: user._id });
-  res.status(201).json({ message: 'Liked', user });
+  try {
+    const liker = await User.findById(req.user.id);
+    liker.likes.push(user._id);
+    await liker.save();
+    likes.push({ liker: req.user.id, liked: user._id });
+    res.status(201).json({ message: 'Liked', user });
+  } catch (err) {
+    console.error('Error posting like:', err);
+    res.status(500).json({ error: 'Failed to like user' });
+  }
 });
 
 // Get Matches
 app.get('/matches', authenticateToken, async (req, res) => {
   try {
-    const yourLikes = likes.filter(l => l.liker === req.user.id).map(l => l.liked);
+    const currentUser = await User.findById(req.user.id);
+    const yourLikes = currentUser.likes;
     const mutualMatches = await User.find({
       _id: { $in: likes.filter(l => l.liked === req.user.id && yourLikes.includes(l.liker)).map(l => l.liker) },
-    }, 'name age bio photo');
+    }, 'firstName lastName age bio photos');
     res.json(mutualMatches);
   } catch (err) {
+    console.error('Error fetching matches:', err);
     res.status(500).json({ error: 'Failed to fetch matches' });
   }
 });
@@ -185,14 +207,14 @@ app.post('/messages/:userId', authenticateToken, async (req, res) => {
   const chatKey = [req.user.id, userId].sort().join(':');
   if (!messages[chatKey]) messages[chatKey] = [];
   const sender = await User.findById(req.user.id);
-  const message = { sender: sender.name, text, timestamp: Date.now() };
+  const message = { sender: `${sender.firstName} ${sender.lastName}`, text, timestamp: Date.now() };
   messages[chatKey].push(message);
 
   // Simulated reply (for demo)
   setTimeout(async () => {
     const recipient = await User.findById(userId);
     messages[chatKey].push({
-      sender: recipient.name,
+      sender: `${recipient.firstName} ${recipient.lastName}`,
       text: `Hey! ${text}`,
       timestamp: Date.now(),
     });
@@ -204,9 +226,10 @@ app.post('/messages/:userId', authenticateToken, async (req, res) => {
 // Profile (Get and Update)
 app.get('/profile', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id, 'name age bio photo');
+    const user = await User.findById(req.user.id, 'firstName lastName age bio gender interests photos');
     res.json(user);
   } catch (err) {
+    console.error('Error fetching profile:', err);
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
@@ -214,13 +237,26 @@ app.get('/profile', authenticateToken, async (req, res) => {
 app.post('/profile', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    user.name = req.body.name || user.name;
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.firstName = req.body.firstName || user.firstName;
+    user.lastName = req.body.lastName || user.lastName;
     user.age = req.body.age || user.age;
     user.bio = req.body.bio || user.bio;
-    user.photo = req.body.photo || user.photo;
+    user.gender = req.body.gender || user.gender;
+    user.interests = req.body.interests || user.interests;
+    user.photos = req.body.photos || user.photos;
     await user.save();
-    res.json({ name: user.name, age: user.age, bio: user.bio, photo: user.photo });
+    res.json({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      age: user.age,
+      bio: user.bio,
+      gender: user.gender,
+      interests: user.interests,
+      photos: user.photos,
+    });
   } catch (err) {
+    console.error('Profile update error:', err);
     res.status(500).json({ error: 'Failed to update profile' });
   }
 });
