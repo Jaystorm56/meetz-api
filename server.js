@@ -45,9 +45,8 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// In-memory data (for demo, will sync with MongoDB where needed)
-let likes = []; // { liker: userId, liked: userId }
-let messages = {};
+// In-memory data (only for messages now)
+let messages = {}; // Keeping for messages only
 
 // Authentication Middleware
 const authenticateToken = (req, res, next) => {
@@ -165,13 +164,30 @@ app.get('/users', authenticateToken, async (req, res) => {
 
 // Post Likes
 app.post('/likes', authenticateToken, async (req, res) => {
-  const { user } = req.body; // user is the liked user's object
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+
   try {
     const liker = await User.findById(req.user.id);
-    liker.likes.push(user._id);
-    await liker.save();
-    likes.push({ liker: req.user.id, liked: user._id });
-    res.status(201).json({ message: 'Liked', user });
+    const likedUser = await User.findById(userId);
+
+    if (!likedUser) {
+      return res.status(404).json({ error: 'Liked user not found' });
+    }
+
+    if (!liker.likes.includes(userId)) {
+      liker.likes.push(userId);
+      await liker.save();
+    }
+
+    const isMatch = likedUser.likes.includes(req.user.id);
+
+    res.status(201).json({
+      message: 'Liked',
+      match: isMatch
+    });
   } catch (err) {
     console.error('Error posting like:', err);
     res.status(500).json({ error: 'Failed to like user' });
@@ -182,9 +198,9 @@ app.post('/likes', authenticateToken, async (req, res) => {
 app.get('/matches', authenticateToken, async (req, res) => {
   try {
     const currentUser = await User.findById(req.user.id);
-    const yourLikes = currentUser.likes;
     const mutualMatches = await User.find({
-      _id: { $in: likes.filter(l => l.liked === req.user.id && yourLikes.includes(l.liker)).map(l => l.liker) },
+      _id: { $in: currentUser.likes }, // Users I liked
+      likes: req.user.id // Who also liked me
     }, 'firstName lastName age bio photos');
     res.json(mutualMatches);
   } catch (err) {
