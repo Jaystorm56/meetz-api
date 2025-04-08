@@ -4,12 +4,22 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const http = require('http');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
 const app = express();
+const server = http.createServer(app); // Create HTTP server for Socket.IO
+const io = new Server(server, {
+  cors: {
+    origin: '*', // Adjust this to your frontend URL in production
+    methods: ['GET', 'POST'],
+  },
+});
+
 const port = process.env.PORT || 3001;
-const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key'; // Set in .env
-const MONGODB_URI = process.env.MONGODB_URI; // Set in .env
+const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(cors());
 app.use(express.json());
@@ -21,7 +31,7 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
 
 // User Schema
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true }, // Email for login
+  username: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   firstName: { type: String, required: true },
   lastName: { type: String, required: true },
@@ -36,17 +46,23 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', userSchema);
 
+// Message Schema
+const messageSchema = new mongoose.Schema({
+  chatId: { type: String, required: true }, // e.g., "user1:user2"
+  senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  text: { type: String, required: true },
+  timestamp: { type: Date, default: Date.now },
+});
+const Message = mongoose.model('Message', messageSchema);
+
 // Email Setup for Password Reset
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER, // Set in .env
-    pass: process.env.EMAIL_PASS, // Set in .env
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
-
-// In-memory data (only for messages now)
-let messages = {}; // Keeping for messages only
 
 // Authentication Middleware
 const authenticateToken = (req, res, next) => {
@@ -59,6 +75,57 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
+// Socket.IO Logic
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+
+  // User joins their own room (based on user ID) for notifications
+  socket.on('joinUser', (userId) => {
+    socket.join(userId);
+    console.log(`User ${userId} joined their room`);
+  });
+
+  // User joins a chat room (based on chatId)
+  socket.on('joinChat', (chatId) => {
+    socket.join(chatId);
+    console.log(`User joined chat ${chatId}`);
+  });
+
+  // Handle sending a message
+  socket.on('sendMessage', async (data) => {
+    const { chatId, senderId, recipientId, text } = data;
+    try {
+      const message = new Message({
+        chatId,
+        senderId,
+        text,
+        timestamp: new Date(),
+      });
+      await message.save();
+
+      // Emit the message to the chat room
+      io.to(chatId).emit('receiveMessage', {
+        senderId,
+        text,
+        timestamp: message.timestamp,
+      });
+
+      // Emit a notification to the recipient's user room
+      io.to(recipientId).emit('newMessageNotification', {
+        chatId,
+        senderId,
+        text,
+      });
+    } catch (err) {
+      console.error('Error saving message:', err);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+  });
+});
 
 // Signup
 app.post('/signup', async (req, res) => {
@@ -115,7 +182,7 @@ app.post('/forgot-password', async (req, res) => {
     const resetLink = `http://your-frontend-url/reset-password?token=${resetToken}`; // Update with hosted frontend URL
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
-      to: username, // Assuming username is email
+      to: username,
       subject: 'Password Reset Request',
       text: `Click this link to reset your password: ${resetLink}. It expires in 15 minutes.`,
     });
@@ -186,7 +253,7 @@ app.post('/likes', authenticateToken, async (req, res) => {
 
     res.status(201).json({
       message: 'Liked',
-      match: isMatch
+      match: isMatch,
     });
   } catch (err) {
     console.error('Error posting like:', err);
@@ -199,8 +266,8 @@ app.get('/matches', authenticateToken, async (req, res) => {
   try {
     const currentUser = await User.findById(req.user.id);
     const mutualMatches = await User.find({
-      _id: { $in: currentUser.likes }, // Users I liked
-      likes: req.user.id // Who also liked me
+      _id: { $in: currentUser.likes },
+      likes: req.user.id,
     }, 'firstName lastName age bio photos');
     res.json(mutualMatches);
   } catch (err) {
@@ -212,31 +279,34 @@ app.get('/matches', authenticateToken, async (req, res) => {
 // Get Messages
 app.get('/messages/:userId', authenticateToken, async (req, res) => {
   const { userId } = req.params;
-  const chatKey = [req.user.id, userId].sort().join(':');
-  res.json(messages[chatKey] || []);
+  const chatId = [req.user.id, userId].sort().join(':');
+  try {
+    const messages = await Message.find({ chatId }).sort({ timestamp: 1 });
+    res.json(messages);
+  } catch (err) {
+    console.error('Error fetching messages:', err);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
 });
 
-// Post Messages
+// Post Messages (still needed for initial HTTP request, but WebSocket handles real-time)
 app.post('/messages/:userId', authenticateToken, async (req, res) => {
   const { userId } = req.params;
   const { text } = req.body;
-  const chatKey = [req.user.id, userId].sort().join(':');
-  if (!messages[chatKey]) messages[chatKey] = [];
-  const sender = await User.findById(req.user.id);
-  const message = { sender: `${sender.firstName} ${sender.lastName}`, text, timestamp: Date.now() };
-  messages[chatKey].push(message);
-
-  // Simulated reply (for demo)
-  setTimeout(async () => {
-    const recipient = await User.findById(userId);
-    messages[chatKey].push({
-      sender: `${recipient.firstName} ${recipient.lastName}`,
-      text: `Hey! ${text}`,
-      timestamp: Date.now(),
+  const chatId = [req.user.id, userId].sort().join(':');
+  try {
+    const message = new Message({
+      chatId,
+      senderId: req.user.id,
+      text,
+      timestamp: new Date(),
     });
-  }, 1000);
-
-  res.status(201).json(message);
+    await message.save();
+    res.status(201).json(message);
+  } catch (err) {
+    console.error('Error sending message:', err);
+    res.status(500).json({ error: 'Failed to send message' });
+  }
 });
 
 // Profile (Get and Update)
@@ -277,6 +347,18 @@ app.post('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-app.listen(port, () => {
+// Get User by ID (for fetching chatted users)
+app.get('/users/:id', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id, 'firstName lastName age bio photos');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (err) {
+    console.error('Error fetching user:', err);
+    res.status(500).json({ error: 'Failed to fetch user' });
+  }
+});
+
+server.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
 });
