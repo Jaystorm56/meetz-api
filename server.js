@@ -276,7 +276,40 @@ app.get('/matches', authenticateToken, async (req, res) => {
   }
 });
 
-// Get Messages
+// Get All Messages for the Current User (New Endpoint)
+app.get('/messages', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    // Fetch all messages where the user is either the sender or recipient
+    const messages = await Message.find({
+      $or: [
+        { senderId: userId },
+        { chatId: { $regex: `^${userId}:|:${userId}$` } }, // Match chatId containing userId
+      ],
+    }).sort({ timestamp: 1 });
+
+    // Group messages by the other user in the conversation
+    const groupedMessages = messages.reduce((acc, message) => {
+      const [user1, user2] = message.chatId.split(':');
+      const otherUserId = user1 === userId ? user2 : user1;
+      if (!acc[otherUserId]) acc[otherUserId] = [];
+      acc[otherUserId].push({
+        chatId: message.chatId,
+        senderId: message.senderId.toString(),
+        text: message.text,
+        timestamp: message.timestamp,
+      });
+      return acc;
+    }, {});
+
+    res.json(groupedMessages);
+  } catch (err) {
+    console.error('Error fetching all messages:', err);
+    res.status(500).json({ error: 'Failed to fetch all messages' });
+  }
+});
+
+// Get Messages for a Specific Chat
 app.get('/messages/:userId', authenticateToken, async (req, res) => {
   const { userId } = req.params;
   const chatId = [req.user.id, userId].sort().join(':');
