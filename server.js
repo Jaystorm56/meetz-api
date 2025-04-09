@@ -46,6 +46,14 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', userSchema);
 
+// Match Schema
+const matchSchema = new mongoose.Schema({
+  user1Id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  user2Id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  createdAt: { type: Date, default: Date.now },
+});
+const Match = mongoose.model('Match', matchSchema);
+
 // Message Schema
 const messageSchema = new mongoose.Schema({
   chatId: { type: String, required: true }, // e.g., "user1:user2"
@@ -212,16 +220,34 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Get Users (for swiping) with Match Percentage
+// Get Users (for swiping) with Match Percentage, excluding matched users
 app.get('/users', authenticateToken, async (req, res) => {
   try {
     const currentUser = await User.findById(req.user.id);
-    const users = await User.find({ _id: { $ne: req.user.id } }, 'firstName lastName age bio gender interests photos');
+    // Fetch all matches involving the current user
+    const matches = await Match.find({
+      $or: [{ user1Id: req.user.id }, { user2Id: req.user.id }],
+    });
+
+    // Extract the IDs of matched users
+    const matchedUserIds = matches.map(match =>
+      match.user1Id.toString() === req.user.id.toString() ? match.user2Id : match.user1Id
+    );
+
+    // Fetch users, excluding the current user and matched users
+    const users = await User.find(
+      {
+        _id: { $ne: req.user.id, $nin: matchedUserIds },
+      },
+      'firstName lastName age bio gender interests photos'
+    );
+
     const usersWithMatch = users.map(user => {
       const commonInterests = user.interests.filter(i => currentUser.interests.includes(i));
       const matchPercentage = Math.round((commonInterests.length / 5) * 100); // Max 5 interests
       return { ...user._doc, matchPercentage };
     });
+
     res.json(usersWithMatch);
   } catch (err) {
     console.error('Error fetching users:', err);
@@ -251,6 +277,20 @@ app.post('/likes', authenticateToken, async (req, res) => {
 
     const isMatch = likedUser.likes.includes(req.user.id);
 
+    if (isMatch) {
+      // Create a match in the matches collection
+      await Match.create({
+        user1Id: req.user.id,
+        user2Id: userId,
+      });
+
+      // Remove the likes since they’ve matched
+      liker.likes = liker.likes.filter(id => id.toString() !== userId.toString());
+      likedUser.likes = likedUser.likes.filter(id => id.toString() !== req.user.id.toString());
+      await liker.save();
+      await likedUser.save();
+    }
+
     res.status(201).json({
       message: 'Liked',
       match: isMatch,
@@ -264,19 +304,30 @@ app.post('/likes', authenticateToken, async (req, res) => {
 // Get Matches
 app.get('/matches', authenticateToken, async (req, res) => {
   try {
-    const currentUser = await User.findById(req.user.id);
-    const mutualMatches = await User.find({
-      _id: { $in: currentUser.likes },
-      likes: req.user.id,
-    }, 'firstName lastName age bio photos');
-    res.json(mutualMatches);
+    // Fetch all matches involving the current user
+    const matches = await Match.find({
+      $or: [{ user1Id: req.user.id }, { user2Id: req.user.id }],
+    });
+
+    // Extract the IDs of matched users
+    const matchedUserIds = matches.map(match =>
+      match.user1Id.toString() === req.user.id.toString() ? match.user2Id : match.user1Id
+    );
+
+    // Fetch the matched users
+    const matchedUsers = await User.find(
+      { _id: { $in: matchedUserIds } },
+      'firstName lastName age bio photos'
+    );
+
+    res.json(matchedUsers);
   } catch (err) {
     console.error('Error fetching matches:', err);
     res.status(500).json({ error: 'Failed to fetch matches' });
   }
 });
 
-// Get All Messages for the Current User (New Endpoint)
+// Get All Messages for the Current User
 app.get('/messages', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
