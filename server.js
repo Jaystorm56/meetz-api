@@ -220,7 +220,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Get Users (for swiping) with Match Percentage, excluding matched users
+// Get Users (for swiping) with Match Percentage, excluding matched users and liked users
 app.get('/users', authenticateToken, async (req, res) => {
   try {
     const currentUser = await User.findById(req.user.id);
@@ -234,10 +234,16 @@ app.get('/users', authenticateToken, async (req, res) => {
       match.user1Id.toString() === req.user.id.toString() ? match.user2Id : match.user1Id
     );
 
-    // Fetch users, excluding the current user and matched users
+    // Get the IDs of users the current user has already liked
+    const likedUserIds = currentUser.likes.map(id => id.toString());
+
+    // Combine matched and liked user IDs to exclude
+    const excludedUserIds = [...new Set([...matchedUserIds, ...likedUserIds])];
+
+    // Fetch users, excluding the current user, matched users, and liked users
     const users = await User.find(
       {
-        _id: { $ne: req.user.id, $nin: matchedUserIds },
+        _id: { $ne: req.user.id, $nin: excludedUserIds },
       },
       'firstName lastName age bio gender interests photos'
     );
