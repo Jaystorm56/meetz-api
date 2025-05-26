@@ -13,7 +13,7 @@ const app = express();
 const server = http.createServer(app); // Create HTTP server for Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: 'https://meetz-api.onrender.com', // Adjust this to your frontend URL in production
+    origin: 'https://meetz-six.vercel.app', // Adjust this to your frontend URL in production
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -25,7 +25,7 @@ const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-sec
 const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(cors({
-  origin: 'https://meetz-api.onrender.com', // <-- Use your actual frontend URL here
+  origin: 'https://meetz-six.vercel.app', // <-- Set to your deployed frontend URL
   credentials: true,
 }));
 app.use(express.json());
