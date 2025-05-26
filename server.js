@@ -184,21 +184,19 @@ app.post('/signup', async (req, res) => {
     // Log cookie setting
     console.log('Setting cookies for user:', username);
     
-    // Set cookies with domain
+    // Set cookies
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 15 * 60 * 1000,
-      domain: '.onrender.com'
+      maxAge: 15 * 60 * 1000
     });
     
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      domain: '.onrender.com'
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
     
     res.status(201).json({ 
@@ -245,21 +243,19 @@ app.post('/login', async (req, res) => {
     // Log cookie setting
     console.log('Setting cookies for user:', username);
     
-    // Set cookies with domain
+    // Set cookies
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 15 * 60 * 1000,
-      domain: '.onrender.com'
+      maxAge: 15 * 60 * 1000
     });
     
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      domain: '.onrender.com'
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
     
     res.json({ 
