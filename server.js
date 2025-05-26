@@ -175,13 +175,13 @@ app.post('/signup', async (req, res) => {
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
-      sameSite: 'strict',
+      sameSite: 'none',
       maxAge: 15 * 60 * 1000, // 15 min
     });
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: true,
-      sameSite: 'strict',
+      sameSite: 'none',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
     res.status(201).json({ user: { id: user._id, username, firstName, lastName } });
@@ -207,13 +207,13 @@ app.post('/login', async (req, res) => {
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
-      sameSite: 'strict',
+      sameSite: 'none',
       maxAge: 15 * 60 * 1000, // 15 min
     });
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: true,
-      sameSite: 'strict',
+      sameSite: 'none',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
     res.json({ user: { id: user._id, username, firstName: user.firstName, lastName: user.lastName } });
@@ -237,7 +237,7 @@ app.post('/refresh-token', async (req, res) => {
     res.cookie('accessToken', newAccessToken, {
       httpOnly: true,
       secure: true,
-      sameSite: 'strict',
+      sameSite: 'none',
       maxAge: 15 * 60 * 1000,
     });
     res.json({ success: true });
@@ -253,8 +253,16 @@ app.post('/logout', authenticateToken, async (req, res) => {
     user.refreshToken = null;
     await user.save();
   }
-  res.clearCookie('accessToken');
-  res.clearCookie('refreshToken');
+  res.clearCookie('accessToken', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none'
+  });
+  res.clearCookie('refreshToken', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none'
+  });
   res.json({ success: true });
 });
 
