@@ -155,70 +155,125 @@ io.on('connection', (socket) => {
 // Signup
 app.post('/signup', async (req, res) => {
   const { username, password, firstName, lastName, termsAgreed } = req.body;
+  
+  // Add request body logging
+  console.log('Signup request body:', { username, firstName, lastName, termsAgreed });
+  
   if (!username || !password || !firstName || !lastName || !termsAgreed) {
+    console.log('Missing required fields');
     return res.status(400).json({ error: 'All fields and terms agreement are required' });
   }
+  
   try {
     const existingUser = await User.findOne({ username });
     if (existingUser) {
+      console.log('Username already exists:', username);
       return res.status(400).json({ error: 'Username already exists' });
     }
+    
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = new User({ username, password: hashedPassword, firstName, lastName });
     await user.save();
+    
     // Generate tokens
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
     user.refreshToken = refreshToken;
     await user.save();
-    // Set cookies
+    
+    // Log cookie setting
+    console.log('Setting cookies for user:', username);
+    
+    // Set cookies with domain
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 15 * 60 * 1000, // 15 min
+      maxAge: 15 * 60 * 1000,
+      domain: '.onrender.com'
     });
+    
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      domain: '.onrender.com'
     });
-    res.status(201).json({ user: { id: user._id, username, firstName, lastName } });
+    
+    res.status(201).json({ 
+      user: { id: user._id, username, firstName, lastName },
+      message: 'Signup successful'
+    });
+    
   } catch (err) {
-    res.status(500).json({ error: 'Signup failed', details: err.message });
+    console.error('Signup error:', err);
+    res.status(500).json({ 
+      error: 'Signup failed', 
+      details: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 });
 
 // Login
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
+  
+  // Add request body logging
+  console.log('Login attempt for:', username);
+  
   try {
     const user = await User.findOne({ username });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user) {
+      console.log('User not found:', username);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+    
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      console.log('Invalid password for user:', username);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
     // Generate tokens
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
     user.refreshToken = refreshToken;
     await user.save();
-    // Set cookies
+    
+    // Log cookie setting
+    console.log('Setting cookies for user:', username);
+    
+    // Set cookies with domain
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 15 * 60 * 1000, // 15 min
+      maxAge: 15 * 60 * 1000,
+      domain: '.onrender.com'
     });
+    
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      domain: '.onrender.com'
     });
-    res.json({ user: { id: user._id, username, firstName: user.firstName, lastName: user.lastName } });
+    
+    res.json({ 
+      user: { id: user._id, username, firstName: user.firstName, lastName: user.lastName },
+      message: 'Login successful'
+    });
+    
   } catch (err) {
-    res.status(500).json({ error: 'Login failed' });
+    console.error('Login error:', err);
+    res.status(500).json({ 
+      error: 'Login failed',
+      details: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 });
 
