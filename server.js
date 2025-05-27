@@ -16,9 +16,7 @@ const io = new Server(server, {
     origin: 'https://meetz-six.vercel.app', // Adjust this to your frontend URL in production
     methods: ['GET', 'POST'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Set-Cookie'],
-    exposedHeaders: ['Set-Cookie'],
-    maxAge: 86400
+    allowedHeaders: ['Content-Type', 'Authorization']
   },
 });
 
@@ -31,11 +29,9 @@ app.use(cors({
   origin: ['https://meetz-six.vercel.app', 'http://localhost:5173'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Set-Cookie'],
-  exposedHeaders: ['Set-Cookie'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   preflightContinue: false,
-  optionsSuccessStatus: 204,
-  maxAge: 86400  // Cache preflight requests for 24 hours
+  optionsSuccessStatus: 204
 }));
 app.use(express.json());
 app.use(cookieParser());
@@ -97,59 +93,22 @@ const generateRefreshToken = (user) => {
   return jwt.sign({ id: user._id, username: user.username }, REFRESH_TOKEN_SECRET, { expiresIn: '7d' });
 };
 
-// Authentication Middleware (from cookie or Authorization header)
+// Authentication Middleware
 const authenticateToken = (req, res, next) => {
-  console.log('Auth attempt - Cookies:', req.cookies);
-  console.log('Auth attempt - Headers:', req.headers);
-  console.log('Auth attempt - Raw Cookie header:', req.headers.cookie);
-  
-  // Try to get token from cookie first
-  let token = req.cookies['accessToken'];
-  
-  // If no cookie, try raw cookie header
-  if (!token && req.headers.cookie) {
-    const cookies = req.headers.cookie.split(';');
-    for (const cookie of cookies) {
-      const [name, value] = cookie.trim().split('=');
-      if (name === 'accessToken') {
-        token = value;
-        break;
-      }
-    }
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Token required' });
   }
-  
-  // If still no token, try Authorization header
-  if (!token && req.headers.authorization) {
-    const authHeader = req.headers.authorization;
-    if (authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7);
-    }
-  }
-  
+
+  const token = authHeader.split(' ')[1];
   if (!token) {
-    console.log('No access token found in cookies or Authorization header');
-    return res.status(401).json({ 
-      error: 'Token required',
-      debug: {
-        cookies: req.cookies,
-        headers: req.headers,
-        rawCookie: req.headers.cookie
-      }
-    });
+    return res.status(401).json({ error: 'Token required' });
   }
-  
+
   jwt.verify(token, ACCESS_TOKEN_SECRET, (err, user) => {
     if (err) {
-      console.log('Token verification failed:', err.message);
-      return res.status(403).json({ 
-        error: 'Invalid token',
-        debug: {
-          error: err.message,
-          token: token.substring(0, 10) + '...' // Log first 10 chars of token for debugging
-        }
-      });
+      return res.status(403).json({ error: 'Invalid token' });
     }
-    console.log('Token verified for user:', user);
     req.user = user;
     next();
   });
@@ -292,19 +251,14 @@ app.post('/signup', async (req, res) => {
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
   
-  console.log('Login attempt for:', username);
-  console.log('Request headers:', req.headers);
-  
   try {
     const user = await User.findOne({ username });
     if (!user) {
-      console.log('User not found:', username);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
-      console.log('Invalid password for user:', username);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
@@ -314,62 +268,19 @@ app.post('/login', async (req, res) => {
     user.refreshToken = refreshToken;
     await user.save();
     
-    console.log('Setting cookies for user:', username);
-    console.log('Cookie settings:', {
-      domain: 'meetz-api.onrender.com',
-      secure: true,
-      sameSite: 'none',
-      httpOnly: true
-    });
-    
-    // Set cookies with mobile-friendly settings
-    res.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 15 * 60 * 1000,
-      path: '/',
-      domain: 'meetz-api.onrender.com',
-      partitioned: true,
-      priority: 'high',
-      // Remove domain for better mobile compatibility
-      domain: undefined
-    });
-    
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-      domain: 'meetz-api.onrender.com',
-      partitioned: true,
-      priority: 'high',
-      // Remove domain for better mobile compatibility
-      domain: undefined
-    });
-
-    // Add Set-Cookie header directly for better mobile support
-    res.setHeader('Set-Cookie', [
-      `accessToken=${accessToken}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=900; Priority=High`,
-      `refreshToken=${refreshToken}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=604800; Priority=High`
-    ]);
-    
-    // Only send user data, no tokens
+    // Send tokens in response
     res.json({ 
       user: { id: user._id, username, firstName: user.firstName, lastName: user.lastName },
+      tokens: {
+        accessToken,
+        refreshToken
+      },
       message: 'Login successful'
     });
     
   } catch (err) {
     console.error('Login error:', err);
-    res.status(500).json({ 
-      error: 'Login failed',
-      details: err.message,
-      debug: {
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-      }
-    });
+    res.status(500).json({ error: 'Login failed' });
   }
 });
 
