@@ -16,6 +16,8 @@ const io = new Server(server, {
     origin: 'https://meetz-six.vercel.app', // Adjust this to your frontend URL in production
     methods: ['GET', 'POST'],
     credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    exposedHeaders: ['Set-Cookie']
   },
 });
 
@@ -28,8 +30,10 @@ app.use(cors({
   origin: ['https://meetz-six.vercel.app', 'http://localhost:5173'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
   exposedHeaders: ['Set-Cookie'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 app.use(express.json());
 app.use(cookieParser());
@@ -216,7 +220,8 @@ app.post('/signup', async (req, res) => {
       sameSite: 'none',
       maxAge: 15 * 60 * 1000,
       path: '/',
-      domain: 'meetz-api.onrender.com'  // Updated to exact domain
+      domain: 'meetz-api.onrender.com',
+      partitioned: true  // Add partitioned flag for iOS
     });
     
     res.cookie('refreshToken', refreshToken, {
@@ -225,7 +230,8 @@ app.post('/signup', async (req, res) => {
       sameSite: 'none',
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
-      domain: 'meetz-api.onrender.com'  // Updated to exact domain
+      domain: 'meetz-api.onrender.com',
+      partitioned: true  // Add partitioned flag for iOS
     });
     
     res.status(201).json({ 
@@ -284,7 +290,8 @@ app.post('/login', async (req, res) => {
       sameSite: 'none',
       maxAge: 15 * 60 * 1000,
       path: '/',
-      domain: 'meetz-api.onrender.com'
+      domain: 'meetz-api.onrender.com',
+      partitioned: true  // Add partitioned flag for iOS
     });
     
     res.cookie('refreshToken', refreshToken, {
@@ -293,7 +300,8 @@ app.post('/login', async (req, res) => {
       sameSite: 'none',
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
-      domain: 'meetz-api.onrender.com'
+      domain: 'meetz-api.onrender.com',
+      partitioned: true  // Add partitioned flag for iOS
     });
     
     // Log response headers
@@ -338,7 +346,8 @@ app.post('/refresh-token', async (req, res) => {
       sameSite: 'none',
       maxAge: 15 * 60 * 1000,
       path: '/',
-      domain: 'meetz-api.onrender.com'  // Updated to exact domain
+      domain: 'meetz-api.onrender.com',
+      partitioned: true  // Add partitioned flag for iOS
     });
     res.json({ success: true });
   } catch (err) {
@@ -358,14 +367,16 @@ app.post('/logout', authenticateToken, async (req, res) => {
     secure: true,
     sameSite: 'none',
     path: '/',
-    domain: 'meetz-api.onrender.com'  // Updated to exact domain
+    domain: 'meetz-api.onrender.com',
+    partitioned: true  // Add partitioned flag for iOS
   });
   res.clearCookie('refreshToken', {
     httpOnly: true,
     secure: true,
     sameSite: 'none',
     path: '/',
-    domain: 'meetz-api.onrender.com'  // Updated to exact domain
+    domain: 'meetz-api.onrender.com',
+    partitioned: true  // Add partitioned flag for iOS
   });
   res.json({ success: true });
 });
