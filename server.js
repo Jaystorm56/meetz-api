@@ -16,7 +16,7 @@ const io = new Server(server, {
     origin: 'https://meetz-six.vercel.app', // Adjust this to your frontend URL in production
     methods: ['GET', 'POST'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Set-Cookie'],
     exposedHeaders: ['Set-Cookie'],
     maxAge: 86400
   },
@@ -31,7 +31,7 @@ app.use(cors({
   origin: ['https://meetz-six.vercel.app', 'http://localhost:5173'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Set-Cookie'],
   exposedHeaders: ['Set-Cookie'],
   preflightContinue: false,
   optionsSuccessStatus: 204,
@@ -101,11 +101,24 @@ const generateRefreshToken = (user) => {
 const authenticateToken = (req, res, next) => {
   console.log('Auth attempt - Cookies:', req.cookies);
   console.log('Auth attempt - Headers:', req.headers);
+  console.log('Auth attempt - Raw Cookie header:', req.headers.cookie);
   
   // Try to get token from cookie first
   let token = req.cookies['accessToken'];
   
-  // If no cookie, try Authorization header
+  // If no cookie, try raw cookie header
+  if (!token && req.headers.cookie) {
+    const cookies = req.headers.cookie.split(';');
+    for (const cookie of cookies) {
+      const [name, value] = cookie.trim().split('=');
+      if (name === 'accessToken') {
+        token = value;
+        break;
+      }
+    }
+  }
+  
+  // If still no token, try Authorization header
   if (!token && req.headers.authorization) {
     const authHeader = req.headers.authorization;
     if (authHeader.startsWith('Bearer ')) {
@@ -119,7 +132,8 @@ const authenticateToken = (req, res, next) => {
       error: 'Token required',
       debug: {
         cookies: req.cookies,
-        headers: req.headers
+        headers: req.headers,
+        rawCookie: req.headers.cookie
       }
     });
   }
@@ -130,7 +144,8 @@ const authenticateToken = (req, res, next) => {
       return res.status(403).json({ 
         error: 'Invalid token',
         debug: {
-          error: err.message
+          error: err.message,
+          token: token.substring(0, 10) + '...' // Log first 10 chars of token for debugging
         }
       });
     }
@@ -225,7 +240,7 @@ app.post('/signup', async (req, res) => {
     // Log cookie setting
     console.log('Setting cookies for user:', username);
     
-    // Set cookies with more permissive settings
+    // Set cookies with mobile-friendly settings
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
@@ -234,7 +249,9 @@ app.post('/signup', async (req, res) => {
       path: '/',
       domain: 'meetz-api.onrender.com',
       partitioned: true,
-      priority: 'high'  // Add priority for better mobile support
+      priority: 'high',
+      // Remove domain for better mobile compatibility
+      domain: undefined
     });
     
     res.cookie('refreshToken', refreshToken, {
@@ -245,8 +262,16 @@ app.post('/signup', async (req, res) => {
       path: '/',
       domain: 'meetz-api.onrender.com',
       partitioned: true,
-      priority: 'high'  // Add priority for better mobile support
+      priority: 'high',
+      // Remove domain for better mobile compatibility
+      domain: undefined
     });
+
+    // Add Set-Cookie header directly for better mobile support
+    res.setHeader('Set-Cookie', [
+      `accessToken=${accessToken}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=900; Priority=High`,
+      `refreshToken=${refreshToken}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=604800; Priority=High`
+    ]);
     
     res.status(201).json({ 
       user: { id: user._id, username, firstName, lastName },
@@ -297,7 +322,7 @@ app.post('/login', async (req, res) => {
       httpOnly: true
     });
     
-    // Set cookies
+    // Set cookies with mobile-friendly settings
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
@@ -305,7 +330,10 @@ app.post('/login', async (req, res) => {
       maxAge: 15 * 60 * 1000,
       path: '/',
       domain: 'meetz-api.onrender.com',
-      partitioned: true
+      partitioned: true,
+      priority: 'high',
+      // Remove domain for better mobile compatibility
+      domain: undefined
     });
     
     res.cookie('refreshToken', refreshToken, {
@@ -315,8 +343,17 @@ app.post('/login', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
       domain: 'meetz-api.onrender.com',
-      partitioned: true
+      partitioned: true,
+      priority: 'high',
+      // Remove domain for better mobile compatibility
+      domain: undefined
     });
+
+    // Add Set-Cookie header directly for better mobile support
+    res.setHeader('Set-Cookie', [
+      `accessToken=${accessToken}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=900; Priority=High`,
+      `refreshToken=${refreshToken}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=604800; Priority=High`
+    ]);
     
     // Only send user data, no tokens
     res.json({ 
