@@ -6,7 +6,6 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const http = require('http');
 const { Server } = require('socket.io');
-const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 const app = express();
@@ -34,7 +33,6 @@ app.use(cors({
   optionsSuccessStatus: 204
 }));
 app.use(express.json());
-app.use(cookieParser());
 
 // MongoDB Connection
 mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
@@ -171,7 +169,6 @@ io.on('connection', (socket) => {
 app.post('/signup', async (req, res) => {
   const { username, password, firstName, lastName, termsAgreed } = req.body;
   
-  // Add request body logging
   console.log('Signup request body:', { username, firstName, lastName, termsAgreed });
   
   if (!username || !password || !firstName || !lastName || !termsAgreed) {
@@ -196,44 +193,12 @@ app.post('/signup', async (req, res) => {
     user.refreshToken = refreshToken;
     await user.save();
     
-    // Log cookie setting
-    console.log('Setting cookies for user:', username);
-    
-    // Set cookies with mobile-friendly settings
-    res.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 15 * 60 * 1000,
-      path: '/',
-      domain: 'meetz-api.onrender.com',
-      partitioned: true,
-      priority: 'high',
-      // Remove domain for better mobile compatibility
-      domain: undefined
-    });
-    
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-      domain: 'meetz-api.onrender.com',
-      partitioned: true,
-      priority: 'high',
-      // Remove domain for better mobile compatibility
-      domain: undefined
-    });
-
-    // Add Set-Cookie header directly for better mobile support
-    res.setHeader('Set-Cookie', [
-      `accessToken=${accessToken}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=900; Priority=High`,
-      `refreshToken=${refreshToken}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=604800; Priority=High`
-    ]);
-    
     res.status(201).json({ 
       user: { id: user._id, username, firstName, lastName },
+      tokens: {
+        accessToken,
+        refreshToken
+      },
       message: 'Signup successful'
     });
     
@@ -286,8 +251,16 @@ app.post('/login', async (req, res) => {
 
 // Refresh Token Endpoint
 app.post('/refresh-token', async (req, res) => {
-  const refreshToken = req.cookies['refreshToken'];
-  if (!refreshToken) return res.status(401).json({ error: 'Refresh token required' });
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Refresh token required' });
+  }
+
+  const refreshToken = authHeader.split(' ')[1];
+  if (!refreshToken) {
+    return res.status(401).json({ error: 'Refresh token required' });
+  }
+
   try {
     const payload = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
     const user = await User.findById(payload.id);
@@ -296,16 +269,10 @@ app.post('/refresh-token', async (req, res) => {
     }
     // Generate new access token
     const newAccessToken = generateAccessToken(user);
-    res.cookie('accessToken', newAccessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 15 * 60 * 1000,
-      path: '/',
-      domain: 'meetz-api.onrender.com',
-      partitioned: true  // Add partitioned flag for iOS
+    res.json({ 
+      accessToken: newAccessToken,
+      message: 'Token refreshed successfully'
     });
-    res.json({ success: true });
   } catch (err) {
     res.status(403).json({ error: 'Invalid refresh token' });
   }
@@ -318,23 +285,10 @@ app.post('/logout', authenticateToken, async (req, res) => {
     user.refreshToken = null;
     await user.save();
   }
-  res.clearCookie('accessToken', {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    path: '/',
-    domain: 'meetz-api.onrender.com',
-    partitioned: true  // Add partitioned flag for iOS
+  res.json({ 
+    success: true,
+    message: 'Logged out successfully'
   });
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    path: '/',
-    domain: 'meetz-api.onrender.com',
-    partitioned: true  // Add partitioned flag for iOS
-  });
-  res.json({ success: true });
 });
 
 // Forgot Password
@@ -385,7 +339,6 @@ app.post('/reset-password', async (req, res) => {
 // Get Users (for swiping) with Match Percentage, excluding matched users and liked users
 app.get('/users', authenticateToken, async (req, res) => {
   console.log('Fetching users - Auth headers:', req.headers);
-  console.log('Fetching users - Cookies:', req.cookies);
   
   try {
     const currentUser = await User.findById(req.user.id);
@@ -426,7 +379,6 @@ app.get('/users', authenticateToken, async (req, res) => {
       error: 'Failed to fetch users',
       debug: {
         error: err.message,
-        cookies: req.cookies,
         headers: req.headers
       }
     });
