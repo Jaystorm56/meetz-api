@@ -25,8 +25,11 @@ const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-sec
 const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(cors({
-  origin: 'https://meetz-six.vercel.app', // <-- Set to your deployed frontend URL
+  origin: ['https://meetz-six.vercel.app', 'http://localhost:5173'],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Set-Cookie'],
 }));
 app.use(express.json());
 app.use(cookieParser());
@@ -184,19 +187,23 @@ app.post('/signup', async (req, res) => {
     // Log cookie setting
     console.log('Setting cookies for user:', username);
     
-    // Set cookies
+    // Set cookies with more permissive settings
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 15 * 60 * 1000
+      maxAge: 15 * 60 * 1000,
+      path: '/',
+      domain: 'meetz-api.onrender.com'  // Updated to exact domain
     });
     
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+      domain: 'meetz-api.onrender.com'  // Updated to exact domain
     });
     
     res.status(201).json({ 
@@ -243,19 +250,23 @@ app.post('/login', async (req, res) => {
     // Log cookie setting
     console.log('Setting cookies for user:', username);
     
-    // Set cookies
+    // Set cookies with more permissive settings
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 15 * 60 * 1000
+      maxAge: 15 * 60 * 1000,
+      path: '/',
+      domain: 'meetz-api.onrender.com'  // Updated to exact domain
     });
     
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+      domain: 'meetz-api.onrender.com'  // Updated to exact domain
     });
     
     res.json({ 
@@ -290,6 +301,8 @@ app.post('/refresh-token', async (req, res) => {
       secure: true,
       sameSite: 'none',
       maxAge: 15 * 60 * 1000,
+      path: '/',
+      domain: 'meetz-api.onrender.com'  // Updated to exact domain
     });
     res.json({ success: true });
   } catch (err) {
@@ -307,12 +320,16 @@ app.post('/logout', authenticateToken, async (req, res) => {
   res.clearCookie('accessToken', {
     httpOnly: true,
     secure: true,
-    sameSite: 'none'
+    sameSite: 'none',
+    path: '/',
+    domain: 'meetz-api.onrender.com'  // Updated to exact domain
   });
   res.clearCookie('refreshToken', {
     httpOnly: true,
     secure: true,
-    sameSite: 'none'
+    sameSite: 'none',
+    path: '/',
+    domain: 'meetz-api.onrender.com'  // Updated to exact domain
   });
   res.json({ success: true });
 });
