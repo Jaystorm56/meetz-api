@@ -93,10 +93,32 @@ const generateRefreshToken = (user) => {
 
 // Authentication Middleware (from cookie)
 const authenticateToken = (req, res, next) => {
+  console.log('Auth attempt - Cookies:', req.cookies);
+  console.log('Auth attempt - Headers:', req.headers);
+  
   const token = req.cookies['accessToken'];
-  if (!token) return res.status(401).json({ error: 'Token required' });
+  if (!token) {
+    console.log('No access token found in cookies');
+    return res.status(401).json({ 
+      error: 'Token required',
+      debug: {
+        cookies: req.cookies,
+        headers: req.headers
+      }
+    });
+  }
+  
   jwt.verify(token, ACCESS_TOKEN_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
+    if (err) {
+      console.log('Token verification failed:', err.message);
+      return res.status(403).json({ 
+        error: 'Invalid token',
+        debug: {
+          error: err.message
+        }
+      });
+    }
+    console.log('Token verified for user:', user);
     req.user = user;
     next();
   });
@@ -225,8 +247,8 @@ app.post('/signup', async (req, res) => {
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
   
-  // Add request body logging
   console.log('Login attempt for:', username);
+  console.log('Request headers:', req.headers);
   
   try {
     const user = await User.findOne({ username });
@@ -247,8 +269,13 @@ app.post('/login', async (req, res) => {
     user.refreshToken = refreshToken;
     await user.save();
     
-    // Log cookie setting
     console.log('Setting cookies for user:', username);
+    console.log('Cookie settings:', {
+      domain: 'meetz-api.onrender.com',
+      secure: true,
+      sameSite: 'none',
+      httpOnly: true
+    });
     
     // Set cookies with more permissive settings
     res.cookie('accessToken', accessToken, {
@@ -257,7 +284,7 @@ app.post('/login', async (req, res) => {
       sameSite: 'none',
       maxAge: 15 * 60 * 1000,
       path: '/',
-      domain: 'meetz-api.onrender.com'  // Updated to exact domain
+      domain: 'meetz-api.onrender.com'
     });
     
     res.cookie('refreshToken', refreshToken, {
@@ -266,12 +293,19 @@ app.post('/login', async (req, res) => {
       sameSite: 'none',
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
-      domain: 'meetz-api.onrender.com'  // Updated to exact domain
+      domain: 'meetz-api.onrender.com'
     });
+    
+    // Log response headers
+    console.log('Response headers:', res.getHeaders());
     
     res.json({ 
       user: { id: user._id, username, firstName: user.firstName, lastName: user.lastName },
-      message: 'Login successful'
+      message: 'Login successful',
+      debug: {
+        cookiesSet: true,
+        headers: res.getHeaders()
+      }
     });
     
   } catch (err) {
@@ -279,7 +313,9 @@ app.post('/login', async (req, res) => {
     res.status(500).json({ 
       error: 'Login failed',
       details: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      debug: {
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      }
     });
   }
 });
@@ -381,6 +417,9 @@ app.post('/reset-password', async (req, res) => {
 
 // Get Users (for swiping) with Match Percentage, excluding matched users and liked users
 app.get('/users', authenticateToken, async (req, res) => {
+  console.log('Fetching users - Auth headers:', req.headers);
+  console.log('Fetching users - Cookies:', req.cookies);
+  
   try {
     const currentUser = await User.findById(req.user.id);
     // Fetch all matches involving the current user
@@ -416,7 +455,14 @@ app.get('/users', authenticateToken, async (req, res) => {
     res.json(usersWithMatch);
   } catch (err) {
     console.error('Error fetching users:', err);
-    res.status(500).json({ error: 'Failed to fetch users' });
+    res.status(500).json({ 
+      error: 'Failed to fetch users',
+      debug: {
+        error: err.message,
+        cookies: req.cookies,
+        headers: req.headers
+      }
+    });
   }
 });
 
