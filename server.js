@@ -12,26 +12,16 @@ const app = express();
 const server = http.createServer(app); // Create HTTP server for Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: 'https://meetz-six.vercel.app', // Adjust this to your frontend URL in production
+    origin: '*', // Adjust this to your frontend URL in production
     methods: ['GET', 'POST'],
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization']
   },
 });
 
 const port = process.env.PORT || 3001;
-const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET || 'your-access-secret-key';
-const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
+const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
 const MONGODB_URI = process.env.MONGODB_URI;
 
-app.use(cors({
-  origin: ['https://meetz-six.vercel.app', 'http://localhost:5173'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-}));
+app.use(cors());
 app.use(express.json());
 
 // MongoDB Connection
@@ -53,7 +43,6 @@ const userSchema = new mongoose.Schema({
   resetToken: String,
   resetTokenExpiry: Date,
   likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  refreshToken: { type: String }, // Store refresh token for revocation
 });
 const User = mongoose.model('User', userSchema);
 
@@ -83,30 +72,13 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Generate Tokens
-const generateAccessToken = (user) => {
-  return jwt.sign({ id: user._id, username: user.username }, ACCESS_TOKEN_SECRET, { expiresIn: '15m' });
-};
-const generateRefreshToken = (user) => {
-  return jwt.sign({ id: user._id, username: user.username }, REFRESH_TOKEN_SECRET, { expiresIn: '7d' });
-};
-
 // Authentication Middleware
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Token required' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ error: 'Token required' });
-  }
-
-  jwt.verify(token, ACCESS_TOKEN_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid token' });
-    }
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token required' });
+  jwt.verify(token, SECRET_KEY, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid token' });
     req.user = user;
     next();
   });
@@ -168,127 +140,41 @@ io.on('connection', (socket) => {
 // Signup
 app.post('/signup', async (req, res) => {
   const { username, password, firstName, lastName, termsAgreed } = req.body;
-  
-  console.log('Signup request body:', { username, firstName, lastName, termsAgreed });
-  
   if (!username || !password || !firstName || !lastName || !termsAgreed) {
-    console.log('Missing required fields');
+    console.log('Signup failed: Missing required fields', { username, firstName, lastName, termsAgreed });
     return res.status(400).json({ error: 'All fields and terms agreement are required' });
   }
-  
   try {
     const existingUser = await User.findOne({ username });
     if (existingUser) {
-      console.log('Username already exists:', username);
+      console.log(`Signup failed: Username ${username} already exists`);
       return res.status(400).json({ error: 'Username already exists' });
     }
-    
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = new User({ username, password: hashedPassword, firstName, lastName });
     await user.save();
-    
-    // Generate tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-    user.refreshToken = refreshToken;
-    await user.save();
-    
-    res.status(201).json({ 
-      user: { id: user._id, username, firstName, lastName },
-      tokens: {
-        accessToken,
-        refreshToken
-      },
-      message: 'Signup successful'
-    });
-    
+    const token = jwt.sign({ id: user._id, username: user.username }, SECRET_KEY, { expiresIn: '1h' });
+    console.log(`User ${username} signed up successfully`);
+    res.status(201).json({ token, user: { id: user._id, username, firstName, lastName } });
   } catch (err) {
-    console.error('Signup error:', err);
-    res.status(500).json({ 
-      error: 'Signup failed', 
-      details: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    console.error('Signup error:', err.message, err.stack);
+    res.status(500).json({ error: 'Signup failed', details: err.message });
   }
 });
 
 // Login
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  
   try {
     const user = await User.findOne({ username });
-    if (!user) {
+    if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    // Generate tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-    user.refreshToken = refreshToken;
-    await user.save();
-    
-    // Send tokens in response
-    res.json({ 
-      user: { id: user._id, username, firstName: user.firstName, lastName: user.lastName },
-      tokens: {
-        accessToken,
-        refreshToken
-      },
-      message: 'Login successful'
-    });
-    
+    const token = jwt.sign({ id: user._id, username: user.username }, SECRET_KEY, { expiresIn: '1h' });
+    res.json({ token, user: { id: user._id, username, firstName: user.firstName, lastName: user.lastName } });
   } catch (err) {
-    console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
   }
-});
-
-// Refresh Token Endpoint
-app.post('/refresh-token', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Refresh token required' });
-  }
-
-  const refreshToken = authHeader.split(' ')[1];
-  if (!refreshToken) {
-    return res.status(401).json({ error: 'Refresh token required' });
-  }
-
-  try {
-    const payload = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
-    const user = await User.findById(payload.id);
-    if (!user || user.refreshToken !== refreshToken) {
-      return res.status(403).json({ error: 'Invalid refresh token' });
-    }
-    // Generate new access token
-    const newAccessToken = generateAccessToken(user);
-    res.json({ 
-      accessToken: newAccessToken,
-      message: 'Token refreshed successfully'
-    });
-  } catch (err) {
-    res.status(403).json({ error: 'Invalid refresh token' });
-  }
-});
-
-// Logout
-app.post('/logout', authenticateToken, async (req, res) => {
-  const user = await User.findById(req.user.id);
-  if (user) {
-    user.refreshToken = null;
-    await user.save();
-  }
-  res.json({ 
-    success: true,
-    message: 'Logged out successfully'
-  });
 });
 
 // Forgot Password
@@ -298,7 +184,7 @@ app.post('/forgot-password', async (req, res) => {
     const user = await User.findOne({ username });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const resetToken = jwt.sign({ id: user._id }, ACCESS_TOKEN_SECRET, { expiresIn: '15m' });
+    const resetToken = jwt.sign({ id: user._id }, SECRET_KEY, { expiresIn: '15m' });
     user.resetToken = resetToken;
     user.resetTokenExpiry = Date.now() + 15 * 60 * 1000; // 15 minutes
     await user.save();
@@ -321,7 +207,7 @@ app.post('/forgot-password', async (req, res) => {
 app.post('/reset-password', async (req, res) => {
   const { token, newPassword } = req.body;
   try {
-    const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET);
+    const decoded = jwt.verify(token, SECRET_KEY);
     const user = await User.findOne({ _id: decoded.id, resetToken: token, resetTokenExpiry: { $gt: Date.now() } });
     if (!user) return res.status(400).json({ error: 'Invalid or expired reset token' });
 
@@ -338,8 +224,6 @@ app.post('/reset-password', async (req, res) => {
 
 // Get Users (for swiping) with Match Percentage, excluding matched users and liked users
 app.get('/users', authenticateToken, async (req, res) => {
-  console.log('Fetching users - Auth headers:', req.headers);
-  
   try {
     const currentUser = await User.findById(req.user.id);
     // Fetch all matches involving the current user
@@ -375,13 +259,7 @@ app.get('/users', authenticateToken, async (req, res) => {
     res.json(usersWithMatch);
   } catch (err) {
     console.error('Error fetching users:', err);
-    res.status(500).json({ 
-      error: 'Failed to fetch users',
-      debug: {
-        error: err.message,
-        headers: req.headers
-      }
-    });
+    res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
 
