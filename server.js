@@ -12,7 +12,7 @@ const app = express();
 const server = http.createServer(app); // Create HTTP server for Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: '*', // Adjust this to your frontend URL in production
+    origin: 'http://localhost:5173', // Adjust this to your frontend URL in production
     methods: ['GET', 'POST'],
   },
 });
